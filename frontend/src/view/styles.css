@@ -299,8 +299,6 @@
 }
 }
 
-
-/* Restored custom fixed Composer layout from the user's frontend. */
 .layout-anim {
   transition: left 0.2s ease, right 0.2s ease;
 }

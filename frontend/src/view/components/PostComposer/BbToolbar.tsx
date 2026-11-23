@@ -7,9 +7,6 @@ import type { MessageKey } from '../../i18n/ru'
 const rowVariants = cva(
   'flex w-full flex-wrap items-center gap-1.5 min-[900px]:w-auto min-[900px]:gap-2.5',
 )
-
-// Text samples are intentionally styled to preview the formatting they insert.
-// Special BB tags use the compact visual labels requested for the toolbar.
 const TEXT_LABEL: Record<string, string> = {
   b: 'B',
   i: 'I',
