@@ -1,5 +1,4 @@
 import { createRoot } from 'solid-js'
-import type { Post } from '../model/entities/post'
 import { withThreadRoles } from '../model/rules/roles'
 import { createQueries } from '../model/selectors/queries'
 import { initializeModel } from './bootstrap'
@@ -19,13 +18,13 @@ import { createSecretCommands } from './commands/secrets'
 import { createSelectionCommands } from './commands/selection'
 import { createSubmissionCommands } from './commands/submission'
 import { createUnreadCommands } from './commands/unread'
+import { createUserCommands } from './commands/user'
 import { createModel, type Commit } from './commit'
 import { failure } from './errors'
 import { createForumGateway } from './forumGateway'
 import { createReceiver } from './ingestion/receive'
 import { writeClipboard } from './io/browser/clipboard'
 import { synchronizeDeadlines } from './synchronization/deadlines'
-import { createPostRefresh } from './synchronization/postRefresh'
 import { createRealtime } from './synchronization/realtime'
 
 export function createController() {
@@ -34,11 +33,13 @@ export function createController() {
     let disposed = false
     const isDisposed = () => disposed
     const write: Commit = (...operations) => { if (!disposed) commit(...operations) }
+    let nextNotification = 1
+    const notify = (error: unknown) => write({ type: 'notification.add', value: { id: nextNotification++, message: failure(error) } })
     const read = createQueries(model)
     const gateway = createForumGateway(model, write)
     const { receive, prepare } = createReceiver(model, write, isDisposed)
     const startup = new AbortController()
-    const ready = initializeModel(model, write, gateway, startup.signal).catch((error) => {
+    const ready = initializeModel(model, write, gateway, startup.signal, notify).catch((error) => {
       write({ type: 'navigation.patch', value: { loading: false, error: failure(error) } })
     })
     const realtime = createRealtime(model, write, gateway, receive, prepare, isDisposed, () => {
@@ -47,13 +48,11 @@ export function createController() {
       navigation.invalidateRoute()
       void navigation.navigate(route, true)
     })
-    const navigation = createNavigation(model, write, gateway, receive, ready, realtime, isDisposed)
+    const navigation = createNavigation(model, write, gateway, receive, ready, realtime, isDisposed, notify)
+    void ready.then(() => navigation.loadForums())
     const posts = createPostCommands(model, write, gateway, receive)
     const previews = createPreviewCommands(model, write, gateway, receive, isDisposed)
-    const refreshPost = createPostRefresh(posts.refetchPost)
     synchronizeDeadlines(model, write)
-    let nextNotification = 1
-    const notify = (error: unknown) => write({ type: 'notification.add', value: { id: nextNotification++, message: failure(error) } })
     const inspection = createInspectionCommands(model, write, gateway)
     const secrets = createSecretCommands(model, write)
     const posting = createPostSubmit(model.operations, write, notify)
@@ -67,7 +66,6 @@ export function createController() {
         threadNumber: (id: string) => read.threadObject(id)?.number ?? null,
         rolesForThread: (id: string) => withThreadRoles(read.roles(), read.rolesForThread(id)),
         onPostContent: (hash: string, bytes: Uint8Array) => posts.addContent(hash, bytes, info.forumId),
-        onPostDone: (post: Post) => refreshPost(post.id, info.forumId),
         onError: notify,
       }
     }, model, write, gateway)
@@ -90,7 +88,9 @@ export function createController() {
       copyText: writeClipboard,
       selection: createSelectionCommands(model, read, moderation, write),
       ...createUnreadCommands(model, write),
+      ...createUserCommands(gateway),
       loadBans: inspection.loadBans,
+      transaction: inspection.transaction,
       loadSnapshot: inspection.loadSnapshot,
       loadHistory: inspection.loadHistory,
       revealSecret: secrets.revealSecret,

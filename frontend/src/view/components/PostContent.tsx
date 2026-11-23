@@ -3,7 +3,8 @@ import { createMemo, type JSX } from 'solid-js'
 import { toHex } from '../../model/content/hex'
 import type { PostPart as PostPartInput } from '../../model/content/postPart'
 import { replyLabel } from '../../model/content/posts'
-import { useForumController, useForumQueries } from '../bindings/forum'
+import { forumKey } from '../../model/selectors/forum'
+import { useForumController, useForumModel, useForumQueries } from '../bindings/forum'
 
 import { useNav } from '../nav'
 import { useRoutes, type Route } from '../route'
@@ -43,15 +44,6 @@ function renderTextWithLinks(text: string): JSX.Element[] {
   return out
 }
 
-function extractCodeText(parts: PostPartInput[]): string {
-  let s = ''
-  for (const p of parts) {
-    if ('Plain' in p) s += p.Plain
-    else if ('Code' in p) s += extractCodeText(p.Code)
-  }
-  return s.replace(/^\n+/, '').replace(/\n+$/, '')
-}
-
 function trimPlain(part: PostPartInput, re: RegExp): PostPartInput {
   return 'Plain' in part ? { Plain: part.Plain.replace(re, '') } : part
 }
@@ -81,6 +73,7 @@ interface RenderOpts {
   postId: ReturnType<typeof useForumQueries>['postId']
   threadPath: ReturnType<typeof useRoutes>['threadPath']
   resolveRelayUrl: (root: string) => string | null
+  forumHost: (forum: string) => string | null
   author: string | null
   hasPost: (id: string) => boolean
   relayUrl: string
@@ -108,7 +101,7 @@ function renderPart(p: PostPartInput, opts: RenderOpts, renderNested: RenderNest
   }
   if ('Bold' in p) return <b>{renderParts(p.Bold, opts, renderNested)}</b>
   if ('Italic' in p) return <i>{renderParts(p.Italic, opts, renderNested)}</i>
-  if ('Code' in p) return <pre class={'my-1.5 block overflow-x-auto whitespace-pre-wrap break-words rounded-sm bg-panel2 p-2.5 font-mono'}>{extractCodeText(p.Code)}</pre>
+  if ('Code' in p) return <pre class={'my-1.5 block overflow-x-auto whitespace-pre-wrap break-words rounded-sm bg-panel2 p-2.5 font-mono'}>{p.Code.replace(/^\n+/, '').replace(/\n+$/, '')}</pre>
   if ('Underline' in p) return <u>{renderParts(p.Underline, opts, renderNested)}</u>
   if ('Overline' in p) return <span class={'overline'}>{renderParts(p.Overline, opts, renderNested)}</span>
   if ('Spoiler' in p) return <span class={'post-spoiler'}>{renderParts(p.Spoiler, opts, renderNested)}</span>
@@ -121,45 +114,43 @@ function renderPart(p: PostPartInput, opts: RenderOpts, renderNested: RenderNest
   if ('ReplyTo' in p) {
     const num = p.ReplyTo.post
     const targetForumId = toHex(p.ReplyTo.forum).replace(/^0x/, '')
-    const sameForum = targetForumId === opts.forumIdHex
-    const sameBoard = p.ReplyTo.board === opts.slug
-    const postId = opts.postId(p.ReplyTo.board, num, targetForumId)
-    const label = `>>${replyLabel(p.ReplyTo, { forumId: opts.forumIdHex, board: opts.slug })}`
-    const target = { board: p.ReplyTo.board, number: num, forumId: targetForumId, relayUrl: sameForum ? opts.relayUrl : opts.resolveRelayUrl(targetForumId) ?? undefined }
-    if (sameForum && sameBoard && postId && opts.hasPost(postId)) {
-      const localHref = opts.slug && opts.threadNum != null ? opts.threadPath(opts.forumIdHex, opts.slug, opts.threadNum, num) : `#post-${num}`
-      return (
-        <PostRefLink
-          class={'cursor-pointer text-accent'}
-          href={localHref}
-          label={label}
-          target={target}
-          onClick={(e) => {
-            e.preventDefault()
-            if (opts.slug != null && opts.threadNum != null) opts.navigate({ page: 'thread', forumId: opts.forumIdHex, slug: opts.slug, threadNum: opts.threadNum, postNum: num })
-            else scrollToPost(num)
-          }}
-        />
-      )
+    const label = () => `>>${replyLabel(p.ReplyTo, { forumId: opts.forumIdHex, board: opts.slug, forumHost: opts.forumHost })}`
+    const localHref = () => {
+      if (targetForumId !== opts.forumIdHex || p.ReplyTo.board !== opts.slug) return null
+      const postId = opts.postId(p.ReplyTo.board, num, targetForumId)
+      if (!postId || !opts.hasPost(postId)) return null
+      return opts.slug && opts.threadNum != null ? opts.threadPath(opts.forumIdHex, opts.slug, opts.threadNum, num) : `#post-${num}`
     }
+    const target = () => ({
+      board: p.ReplyTo.board,
+      number: num,
+      forumId: targetForumId,
+      relayUrl: targetForumId === opts.forumIdHex ? opts.relayUrl : opts.resolveRelayUrl(targetForumId) ?? undefined,
+    })
     return (
       <PostRefLink
         class={'cursor-pointer text-accent'}
-        label={label}
-        target={target}
+        href={localHref() ?? undefined}
+        label={label()}
+        target={target()}
         onClick={(e) => {
           e.preventDefault()
-          void (async () => {
-            try {
-              const relay = sameForum ? opts.relayUrl : opts.resolveRelayUrl(targetForumId) ?? opts.relayUrl
-              const data = await opts.resolvePost(relay, p.ReplyTo.board, num)
-              const slug = data.board.slug
-              const threadNum = data.thread.number
-              opts.navigate({ page: 'thread', forumId: targetForumId, slug, threadNum, postNum: num })
-            } catch {
-              return
-            }
-          })()
+          if (localHref() === null) {
+            void (async () => {
+              try {
+                const relay = targetForumId === opts.forumIdHex ? opts.relayUrl : opts.resolveRelayUrl(targetForumId) ?? opts.relayUrl
+                const data = await opts.resolvePost(relay, p.ReplyTo.board, num)
+                const slug = data.board.slug
+                const threadNum = data.thread.number
+                opts.navigate({ page: 'thread', forumId: targetForumId, slug, threadNum, postNum: num })
+              } catch {
+                return
+              }
+            })()
+            return
+          }
+          if (opts.slug != null && opts.threadNum != null) opts.navigate({ page: 'thread', forumId: opts.forumIdHex, slug: opts.slug, threadNum: opts.threadNum, postNum: num })
+          else scrollToPost(num)
         }}
       />
     )
@@ -233,6 +224,11 @@ export function PostContent(props: {
   const { threadPath } = useRoutes()
   const controller = useForumController()
   const read = useForumQueries()
+  const model = useForumModel()
+  const forumHost = (forum: string) => {
+    const entry = model.navigation.forums.find((value) => forumKey(value.forumId) === forum)
+    return entry ? new URL(entry.relayUrl).host : null
+  }
   const inputs = createMemo(
     () => ({
       parts: props.parts,
@@ -263,6 +259,7 @@ export function PostContent(props: {
       threadPath,
       author: current.author,
       resolveRelayUrl: read.relayUrl,
+      forumHost,
       hasPost: current.hasPost,
       relayUrl: current.relayUrl,
       navigate: nav.navigate,

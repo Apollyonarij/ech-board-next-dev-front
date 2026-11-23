@@ -3,10 +3,10 @@ import { bcs } from '@mysten/bcs'
 
 import type { SessionState } from '../../../model/state/session'
 import { Identity, randomTweak } from '../crypto/identity'
-import type { BoardPageEntity, PostPageEntity, ThreadPageEntity, UserRequests } from './protocol/entities'
+import type { BoardPageEntity, PostPageEntity, ThreadPageEntity, UserEntity, UserRequests } from './protocol/entities'
 import type { BoardCursor } from '../../../model/entities/board'
 import { EntityId } from './protocol/entityId'
-import { EsidSchema, type Esid, type Media, type Resources } from './protocol/transactions'
+import { EsidSchema, type Esid, type Media, type Resources, type Tx } from './protocol/transactions'
 import * as relay from './relay'
 
 const Hash = bcs.bytes(32)
@@ -50,6 +50,8 @@ export const Calls = {
         'forum.set_title',
         withId(EntityId.forum(), tuple(Hash).serialize([hashBytes(title)]).toBytes()),
       ),
+    set_pow_bits: (value: number) =>
+      call('forum.set_pow_bits', withId(EntityId.forum(), tuple(bcs.u8()).serialize([value]).toBytes())),
     add_moderator: (member: string) =>
       call(
         'forum.add_moderator',
@@ -60,30 +62,30 @@ export const Calls = {
         'forum.remove_moderator',
         withId(EntityId.forum(), tuple(EsidField).serialize([esidBytes(member)]).toBytes()),
       ),
-    ban: (target: string, reason: string | null, expires: bigint) =>
+    ban: (target: string, author: string, reason: string | null, expires: bigint | null) =>
       call(
         'forum.ban',
         withId(
           EntityId.forum(),
-          tuple(EsidField, bcs.option(Hash), bcs.u64())
-            .serialize([esidBytes(target), optionalHash(reason), expires])
+          tuple(Hash, bcs.option(Hash), bcs.option(bcs.u64()))
+            .serialize([hashBytes(target), optionalHash(reason), expires])
             .toBytes(),
         ),
-        [esidBytes(target)],
+        [esidBytes(author)],
       ),
-    unban: (target: string) =>
+    unban: (target: string, author: string) =>
       call(
         'forum.unban',
-        withId(EntityId.forum(), tuple(EsidField).serialize([esidBytes(target)]).toBytes()),
-        [esidBytes(target)],
+        withId(EntityId.forum(), tuple(Hash).serialize([hashBytes(target)]).toBytes()),
+        [esidBytes(author)],
       ),
     ban_list: (after: string | null, limit: number) =>
       call(
         'forum.ban_list',
         withId(
           EntityId.forum(),
-          tuple(bcs.option(EsidField), bcs.u32())
-            .serialize([after === null ? null : esidBytes(after), limit])
+          tuple(bcs.option(Hash), bcs.u32())
+            .serialize([after === null ? null : hashBytes(after), limit])
             .toBytes(),
         ),
       ),
@@ -105,6 +107,12 @@ export const Calls = {
       call('board.set_bump_limit', withId(id, tuple(bcs.u32()).serialize([value]).toBytes())),
     set_max_media: (id: string, value: number) =>
       call('board.set_max_media', withId(id, tuple(bcs.u8()).serialize([value]).toBytes())),
+    set_post_rate_limit: (id: string, value: number) =>
+      call('board.set_post_rate_limit', withId(id, tuple(bcs.u32()).serialize([value]).toBytes())),
+    set_reaction_rate_limit: (id: string, value: number) =>
+      call('board.set_reaction_rate_limit', withId(id, tuple(bcs.u32()).serialize([value]).toBytes())),
+    set_pow_bits: (id: string, value: number) =>
+      call('board.set_pow_bits', withId(id, tuple(bcs.u8()).serialize([value]).toBytes())),
     set_description: (id: string, value: string | null) =>
       call(
         'board.set_description',
@@ -135,30 +143,30 @@ export const Calls = {
         'board.remove_moderator',
         withId(id, tuple(EsidField).serialize([esidBytes(member)]).toBytes()),
       ),
-    ban: (id: string, target: string, reason: string | null, expires: bigint) =>
+    ban: (id: string, target: string, author: string, reason: string | null, expires: bigint | null) =>
       call(
         'board.ban',
         withId(
           id,
-          tuple(EsidField, bcs.option(Hash), bcs.u64())
-            .serialize([esidBytes(target), optionalHash(reason), expires])
+          tuple(Hash, bcs.option(Hash), bcs.option(bcs.u64()))
+            .serialize([hashBytes(target), optionalHash(reason), expires])
             .toBytes(),
         ),
-        [esidBytes(target)],
+        [esidBytes(author)],
       ),
-    unban: (id: string, target: string) =>
+    unban: (id: string, target: string, author: string) =>
       call(
         'board.unban',
-        withId(id, tuple(EsidField).serialize([esidBytes(target)]).toBytes()),
-        [esidBytes(target)],
+        withId(id, tuple(Hash).serialize([hashBytes(target)]).toBytes()),
+        [esidBytes(author)],
       ),
     ban_list: (id: string, after: string | null, limit: number) =>
       call(
         'board.ban_list',
         withId(
           id,
-          tuple(bcs.option(EsidField), bcs.u32())
-            .serialize([after === null ? null : esidBytes(after), limit])
+          tuple(bcs.option(Hash), bcs.u32())
+            .serialize([after === null ? null : hashBytes(after), limit])
             .toBytes(),
         ),
       ),
@@ -230,30 +238,30 @@ export const Calls = {
         'thread.remove_moderator',
         withId(id, tuple(EsidField).serialize([esidBytes(member)]).toBytes()),
       ),
-    ban: (id: string, target: string, reason: string | null, expires: bigint) =>
+    ban: (id: string, target: string, author: string, reason: string | null, expires: bigint | null) =>
       call(
         'thread.ban',
         withId(
           id,
-          tuple(EsidField, bcs.option(Hash), bcs.u64())
-            .serialize([esidBytes(target), optionalHash(reason), expires])
+          tuple(Hash, bcs.option(Hash), bcs.option(bcs.u64()))
+            .serialize([hashBytes(target), optionalHash(reason), expires])
             .toBytes(),
         ),
-        [esidBytes(target)],
+        [esidBytes(author)],
       ),
-    unban: (id: string, target: string) =>
+    unban: (id: string, target: string, author: string) =>
       call(
         'thread.unban',
-        withId(id, tuple(EsidField).serialize([esidBytes(target)]).toBytes()),
-        [esidBytes(target)],
+        withId(id, tuple(Hash).serialize([hashBytes(target)]).toBytes()),
+        [esidBytes(author)],
       ),
     ban_list: (id: string, after: string | null, limit: number) =>
       call(
         'thread.ban_list',
         withId(
           id,
-          tuple(bcs.option(EsidField), bcs.u32())
-            .serialize([after === null ? null : esidBytes(after), limit])
+          tuple(bcs.option(Hash), bcs.u32())
+            .serialize([after === null ? null : hashBytes(after), limit])
             .toBytes(),
         ),
       ),
@@ -307,16 +315,6 @@ export const Calls = {
         'post.unban_media',
         withId(id, tuple(hashList).serialize([hashes.map(hashBytes)]).toBytes()),
       ),
-    set_banned: (id: string, banned: string | null) =>
-      call(
-        'post.set_banned',
-        withId(
-          id,
-          tuple(bcs.option(EsidField))
-            .serialize([banned === null ? null : esidBytes(banned)])
-            .toBytes(),
-        ),
-      ),
     set_mod_note: (id: string, value: string | null) =>
       call(
         'post.set_mod_note',
@@ -358,6 +356,7 @@ export class ForumApi {
     onPrepared?: (txid: string) => void,
     requests: UserRequests = relay.NO_REQUESTS,
     trip: string | null = null,
+    powBits = 0,
   ): Promise<{ txid: string; result: Uint8Array }> {
     const identity = this.identity
     const [first] = await relay.submit(
@@ -372,6 +371,7 @@ export class ForumApi {
           },
           requests,
           trip,
+          powBits,
           blobs: blobs.map((blob) => blob.bytes),
         },
       ],
@@ -394,6 +394,11 @@ export class ForumApi {
         access: { decrypt: operation.decryptions },
       })),
     )
+  }
+
+  async transactions(txids: string[]): Promise<Map<string, Tx>> {
+    if (!txids.length) return new Map()
+    return relay.readTransactions(this.relay, txids.map(hashBytes))
   }
 
   async loadContent(hash: string | Uint8Array, path: ContentPath): Promise<Uint8Array | null> {
@@ -440,6 +445,10 @@ export class ForumApi {
       this.access(),
     )
     return page
+  }
+
+  user(): Promise<UserEntity | null> {
+    return relay.readUser(this.relay, this.identity, this.access())
   }
 
 }

@@ -17,6 +17,7 @@ import {
   roleForBoardSoft,
   roleForPostAction,
   roleForThreadAction,
+  roleForThreadAdminMgmt,
   SELF_MOD_WINDOW_MS,
 } from '../../model/rules/permissions'
 import type { RoleOption } from '../../model/rules/roles'
@@ -37,7 +38,6 @@ export interface ModEnv {
   threadNumber: (threadId: string) => number | null
   roles: RoleOption[]
   rolesForThread: (threadId: string) => RoleOption[]
-  onPostDone?: (post: Post) => Promise<void> | void
   onPostContent?: (hashHex: string, blob: Uint8Array) => void
   onError: (e: unknown) => void
 }
@@ -64,15 +64,13 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
   const busy = () => model.operations.moderating
   const setBusy = (moderating: boolean) => commit({ type: 'operations.patch', value: { moderating } })
 
-  const runAction = async (fn: () => Promise<void>, done?: (env: ModEnv) => Promise<void> | void) => {
+  const runAction = async (fn: () => Promise<void>) => {
     if (busy()) return
-    const env = getEnv()
     setBusy(true)
     try {
       await fn()
-      await done?.(env)
     } catch (error) {
-      env.onError(error)
+      getEnv().onError(error)
     }
     setBusy(false)
   }
@@ -117,99 +115,82 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
     secretRefs?: Map<number, PostPartInput>,
   ) => {
     let saved = false
-    await runAction(
-      async () => {
-        const env = getEnv()
-        const role = roleForPost(post, env, 'edit')
-        const parsed = await parseBbCode(
-          value,
-          makePostResolver({ model, gateway, forumId: env.forumId, boardId: env.boardId, slug: env.slug, relayUrl: env.relayUrl, receive: env.receive }),
-        )
-        const api = await gateway.connect(env.relayUrl)
-        const secret = api.identity.secret(api.root, roleTweak(role))
-        const parts = await finalizeParts(parsed, secret, secretRefs)
-        const blob = parts.length > 0 ? serializePostParts(parts) : null
-        const hash = blob ? toHex(blake2b(blob, { dkLen: 32 })) : null
-        await api.append(
-          Calls.post.set_text(postId(env, threadId, post), hash),
-          blob && hash ? [{ hash, bytes: blob }] : [],
-          roleTweak(role),
-        )
-        if (blob && hash) env.onPostContent?.(hash, blob)
-        saved = true
-      },
-      (env) => env.onPostDone?.(post),
-    )
+    await runAction(async () => {
+      const env = getEnv()
+      const role = roleForPost(post, env, 'edit')
+      const parsed = await parseBbCode(
+        value,
+        makePostResolver({ model, gateway, forumId: env.forumId, boardId: env.boardId, slug: env.slug, relayUrl: env.relayUrl, receive: env.receive }),
+      )
+      const api = await gateway.connect(env.relayUrl)
+      const secret = api.identity.secret(api.root, roleTweak(role))
+      const parts = await finalizeParts(parsed, secret, secretRefs)
+      const blob = parts.length > 0 ? serializePostParts(parts) : null
+      const hash = blob ? toHex(blake2b(blob, { dkLen: 32 })) : null
+      await api.append(
+        Calls.post.set_text(postId(env, threadId, post), hash),
+        blob && hash ? [{ hash, bytes: blob }] : [],
+        roleTweak(role),
+      )
+      if (blob && hash) env.onPostContent?.(hash, blob)
+      saved = true
+    })
     return saved
   }
 
   const runPostBanMedia = (post: Post, threadId: string, hashes: Uint8Array[]) =>
-    runAction(
-      async () => {
-        const env = getEnv()
-        const role = roleForPost(post, env, 'ban_media')
-        await submit(env, role, Calls.post.ban_media(postId(env, threadId, post), hashes.map(toHex)))
-      },
-      (env) => env.onPostDone?.(post),
-    )
+    runAction(async () => {
+      const env = getEnv()
+      const role = roleForPost(post, env, 'ban_media')
+      await submit(env, role, Calls.post.ban_media(postId(env, threadId, post), hashes.map(toHex)))
+    })
 
   const runPostUnbanMedia = (post: Post, threadId: string, hashes: Uint8Array[]) =>
-    runAction(
-      async () => {
-        const env = getEnv()
-        const role = roleForPost(post, env, 'unban_media')
-        await submit(env, role, Calls.post.unban_media(postId(env, threadId, post), hashes.map(toHex)))
-      },
-      (env) => env.onPostDone?.(post),
-    )
+    runAction(async () => {
+      const env = getEnv()
+      const role = roleForPost(post, env, 'unban_media')
+      await submit(env, role, Calls.post.unban_media(postId(env, threadId, post), hashes.map(toHex)))
+    })
 
-  const banTarget = (env: ModEnv, scope: BanScope, threadId: string, _role: RoleOption, target: string, durationMs: number, reason: string) =>
-    scope === 'forum'
-      ? Calls.forum.ban(target, reason ? toHex(hashOf(reason)) : null, expiresOf(durationMs))
-      : scope === 'board'
-        ? Calls.board.ban(env.boardId, target, reason ? toHex(hashOf(reason)) : null, expiresOf(durationMs))
-        : Calls.thread.ban(threadId, target, reason ? toHex(hashOf(reason)) : null, expiresOf(durationMs))
-
-  function expiresOf(durationMs: number): bigint {
-    return durationMs > 0 ? BigInt(Date.now() + durationMs) : 0n
+  const reasonOf = (reason: string) => {
+    if (!reason) return { hash: null, blobs: [] }
+    const hash = toHex(hashOf(reason))
+    return { hash, blobs: [{ hash, bytes: text.encode(reason) }] }
   }
 
-  const runBan = (post: Post, threadId: string, scope: BanScope, _mask: number, durationMs: number, reason: string) =>
-    runAction(
-      async () => {
-        const env = getEnv()
-        const role = roleForBan(scope, env.roles)
-        if (!signable(role)) throw new Error(`no role for ${scope} ban`)
-        await submit(env, role, banTarget(env, scope, threadId, role, senderEsid(post), durationMs, reason))
-      },
-      (env) => env.onPostDone?.(post),
-    )
+  const banTarget = (env: ModEnv, scope: BanScope, threadId: string, target: string, author: string, reason: string | null, expires: bigint | null) =>
+    scope === 'forum'
+      ? Calls.forum.ban(target, author, reason, expires)
+      : scope === 'board'
+        ? Calls.board.ban(env.boardId, target, author, reason, expires)
+        : Calls.thread.ban(threadId, target, author, reason, expires)
 
-  const runBanId = (target: string, threadId: string, scope: BanScope, _mask: number, durationMs: number, reason: string) =>
+  function expiresOf(durationMs: number): bigint | null {
+    return durationMs > 0 ? BigInt(Date.now() + durationMs) : null
+  }
+
+  const runBan = (post: Post, threadId: string, scope: BanScope, durationMs: number, reason: string) =>
     runAction(async () => {
       const env = getEnv()
       const role = roleForBan(scope, env.roles)
       if (!signable(role)) throw new Error(`no role for ${scope} ban`)
-      await submit(env, role, banTarget(env, scope, threadId, role, target.replace(/^0x/, ''), durationMs, reason))
+      const reasonValue = reasonOf(reason)
+      await submit(env, role, banTarget(env, scope, threadId, toHex(post.txid), senderEsid(post), reasonValue.hash, expiresOf(durationMs)), reasonValue.blobs)
     })
 
-  const runUnban = (post: Post, threadId: string, scope: BanScope) =>
-    runAction(
-      async () => {
-        const env = getEnv()
-        const role = roleForBan(scope, env.roles)
-        if (!signable(role)) throw new Error(`no role for ${scope} unban`)
-        const target = senderEsid(post)
-        const call =
-          scope === 'forum'
-            ? Calls.forum.unban(target)
-            : scope === 'board'
-              ? Calls.board.unban(env.boardId, target)
-              : Calls.thread.unban(threadId, target)
-        await submit(env, role, call)
-      },
-      (env) => env.onPostDone?.(post),
-    )
+  const runUnban = (target: string, author: string, scope: BanScope, id: string) =>
+    runAction(async () => {
+      const env = getEnv()
+      const role = roleForBan(scope, env.roles)
+      if (!signable(role)) throw new Error(`no role for ${scope} unban`)
+      const call =
+        scope === 'forum'
+          ? Calls.forum.unban(target, author)
+          : scope === 'board'
+            ? Calls.board.unban(id, target, author)
+            : Calls.thread.unban(id, target, author)
+      await submit(env, role, call)
+    })
 
   const batch = async (
     posts: Post[],
@@ -217,12 +198,13 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
     onProgress: ((done: number, total: number) => void) | undefined,
     call: (post: Post) => Call,
     role: RoleOption | null,
+    blobs: { hash: string; bytes: Uint8Array }[] = [],
   ) => {
     const env = getEnv()
     if (!signable(role)) throw new Error('no role for batch action')
     let done = 0
     for (const post of posts) {
-      await submit(env, role, call(post))
+      await submit(env, role, call(post), blobs)
       done += 1
       onProgress?.(done, posts.length)
     }
@@ -258,7 +240,6 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
     posts: Post[],
     threadId: string,
     scope: BanScope,
-    _mask: number,
     durationMs: number,
     reason: string,
     onProgress?: (done: number, total: number) => void,
@@ -272,12 +253,14 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
       seen.add(target)
       return true
     })
+    const reasonValue = reasonOf(reason)
     return batch(
       targets,
       threadId,
       onProgress,
-      (post) => banTarget(env, scope, threadId, role!, senderEsid(post), durationMs, reason),
+      (post) => banTarget(env, scope, threadId, toHex(post.txid), senderEsid(post), reasonValue.hash, expiresOf(durationMs)),
       role,
+      reasonValue.blobs,
     )
   }
 
@@ -339,6 +322,15 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
   const runBoardSetBumpLimit = (value: number) =>
     boardSetting((env) => Calls.board.set_bump_limit(env.boardId, value), roleForBoardCore(getEnv().roles))
 
+  const runBoardSetPostRateLimit = (value: number) =>
+    boardSetting((env) => Calls.board.set_post_rate_limit(env.boardId, value), roleForBoardCore(getEnv().roles))
+
+  const runBoardSetReactionRateLimit = (value: number) =>
+    boardSetting((env) => Calls.board.set_reaction_rate_limit(env.boardId, value), roleForBoardCore(getEnv().roles))
+
+  const runBoardSetPowBits = (value: number) =>
+    boardSetting((env) => Calls.board.set_pow_bits(env.boardId, value), roleForBoardCore(getEnv().roles))
+
   const runBoardSetIgnoreForumBans = (value: boolean) =>
     boardSetting((env) => Calls.board.set_ignore_forum_bans(env.boardId, value), roleForBoardCore(getEnv().roles))
 
@@ -366,11 +358,21 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
       await submit(env, role, Calls.board.set_pinned(env.boardId, pinned))
     })
 
-  const runBoardAddModerator = (target: string) =>
-    boardSetting((env) => Calls.board.add_moderator(env.boardId, target.replace(/^0x/, '')), roleForBoardCore(getEnv().roles))
+  const runBoardAddModerator = (boardId: string, target: string) =>
+    runAction(async () => {
+      const env = getEnv()
+      const role = roleForBoardCore(env.roles)
+      if (!signable(role)) throw new Error('no role for board settings')
+      await submit(env, role, Calls.board.add_moderator(boardId, target.replace(/^0x/, '')))
+    })
 
-  const runBoardDelModerator = (target: string) =>
-    boardSetting((env) => Calls.board.remove_moderator(env.boardId, target.replace(/^0x/, '')), roleForBoardCore(getEnv().roles))
+  const runBoardDelModerator = (boardId: string, target: string) =>
+    runAction(async () => {
+      const env = getEnv()
+      const role = roleForBoardCore(env.roles)
+      if (!signable(role)) throw new Error('no role for board settings')
+      await submit(env, role, Calls.board.remove_moderator(boardId, target.replace(/^0x/, '')))
+    })
 
   const runBoardClose = (value: boolean) =>
     boardSetting((env) => Calls.board.set_readonly(env.boardId, value), roleForBoardCore(getEnv().roles))
@@ -378,25 +380,25 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
   const runThreadSetAdmin = (threadId: string, target: string | null) =>
     runAction(async () => {
       const env = getEnv()
-      const role = roleForThreadAction('edit_topic', env.rolesForThread(threadId))
+      const role = roleForThreadAdminMgmt(env.rolesForThread(threadId))
       if (!signable(role)) throw new Error('no role for thread admin')
-      await submit(env, role, Calls.thread.set_admin(threadId, target))
+      await submit(env, role, Calls.thread.set_admin(threadId, target && target.replace(/^0x/, '')))
     })
 
   const runThreadAddModerator = (threadId: string, target: string) =>
     runAction(async () => {
       const env = getEnv()
-      const role = roleForThreadAction('edit_topic', env.rolesForThread(threadId))
+      const role = roleForThreadAdminMgmt(env.rolesForThread(threadId))
       if (!signable(role)) throw new Error('no role for thread moderators')
-      await submit(env, role, Calls.thread.add_moderator(threadId, target))
+      await submit(env, role, Calls.thread.add_moderator(threadId, target.replace(/^0x/, '')))
     })
 
   const runThreadDelModerator = (threadId: string, target: string) =>
     runAction(async () => {
       const env = getEnv()
-      const role = roleForThreadAction('edit_topic', env.rolesForThread(threadId))
+      const role = roleForThreadAdminMgmt(env.rolesForThread(threadId))
       if (!signable(role)) throw new Error('no role for thread moderators')
-      await submit(env, role, Calls.thread.remove_moderator(threadId, target))
+      await submit(env, role, Calls.thread.remove_moderator(threadId, target.replace(/^0x/, '')))
     })
 
   return {
@@ -408,7 +410,6 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
     runThreadCloseDelete,
     runThreadEditTopic,
     runBan,
-    runBanId,
     runUnban,
     runBatchPostDelete,
     runBatchPostRestore,
@@ -416,6 +417,9 @@ export function createModActions(getEnv: () => ModEnv, model: ForumState, commit
     runBoardSetDescription,
     runBoardSetMaxMedia,
     runBoardSetBumpLimit,
+    runBoardSetPostRateLimit,
+    runBoardSetReactionRateLimit,
+    runBoardSetPowBits,
     runBoardSetIgnoreForumBans,
     runBoardSetReactions,
     runBoardSetPinned,

@@ -122,6 +122,17 @@ export function createEntityUpdates(model: ForumState, write: SetStoreFunction<F
       if (contentHashes.size) {
         for (const hash of contentHashes) for (const id of Object.keys(scope.contentPosts[hash] ?? {})) affected.add(id)
       }
+      if (changes.bans !== undefined) {
+        const ids = (changes.posts ?? []).map((entity) => scope.postIds[numberKey(entity.key.board, Number(entity.key.number))] ?? EntityId.post(entity.key.board, Number(entity.key.number)))
+        write('scopes', root, 'postBans', produce((values) => {
+          for (const id of ids) delete values[id]
+          for (const [id, ban] of changes.bans ?? []) {
+            const known = values[id]
+            if (!known) values[id] = [ban]
+            else if (!known.includes(ban)) known.push(ban)
+          }
+        }))
+      }
       for (const hash of attachmentHashes) for (const id of Object.keys(scope.attachmentPosts[hash] ?? {})) changed.add(id)
       for (const id of affected) changed.add(id)
       threadPosts.apply(root, additions, changed)
@@ -150,6 +161,7 @@ export function createEntityUpdates(model: ForumState, write: SetStoreFunction<F
       write('scopes', root, 'entities', 'posts', produce((posts) => { delete posts[id] }))
       write('scopes', root, 'myReactions', produce((reactions) => { delete reactions[id] }))
       write('scopes', root, 'pendingReactions', produce((reactions) => { delete reactions[id] }))
+      write('scopes', root, 'postBans', produce((bans) => { delete bans[id] }))
       lifecycle.releasePost(root, id)
       removePermissionDeadline(model, write, root, id)
     }
@@ -165,8 +177,13 @@ export function createEntityUpdates(model: ForumState, write: SetStoreFunction<F
     write('scopes', produce((scopes) => { delete scopes[root] }))
   }
   const reset = () => {
-    for (const root of Object.keys(model.scopes)) lifecycle.releaseScope(root)
-    write('scopes', reconcile({}))
+    for (const root of Object.keys(model.scopes)) {
+      const scope = model.scopes[root]
+      if (!scope) continue
+      lifecycle.releaseScope(root)
+      const fresh = initialForumScope(root, scope.relayUrl)
+      write('scopes', root, reconcile({ ...fresh, entities: { ...fresh.entities, forums: scope.entities.forums, boards: scope.entities.boards } }))
+    }
     write('references', reconcile({}))
     write('outgoing', reconcile({}))
   }

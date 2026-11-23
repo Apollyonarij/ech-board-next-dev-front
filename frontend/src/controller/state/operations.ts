@@ -1,5 +1,7 @@
 import type { ForumState, PendingReaction, PostPreview, ReactionSelection } from '../../model/state/forum'
+import type { Failure } from '../../model/errors'
 import type { BanListState, HistoryState, SnapshotState } from '../../model/state/inspection'
+import type { BanScope } from '../../model/rules/permissions'
 import type { SecretState } from '../../model/state/resources'
 import type { EntityUpdate } from './entities.types'
 
@@ -19,6 +21,7 @@ interface OperationValues {
   'draft.patch': { mode: 'reply' | 'thread'; value: Partial<Omit<ForumState['drafts']['reply'], 'revision'>> }
   'operations.patch': Partial<ForumState['operations']>
   'bans.set': { key: string; value: BanListState }
+  'postBans.set': { root: string; id: string; scopes: BanScope[] }
   'history.set': { key: string; value: HistoryState }
   'snapshot.set': { key: string; value: SnapshotState }
   'secret.set': { key: string; value: SecretState }
@@ -32,6 +35,7 @@ interface OperationValues {
   'permissions.expire': number
   'permissions.refresh': { root: string; posts: { board: string; number: number }[]; at: number }
   'navigation.patch': Partial<ForumState['navigation']>
+  'forum.error': { forumId: string; error: Failure | null }
   'entities.ingest': EntityUpdate
   'preview.set': PostPreview
   'authors.merge': { root: string; values: ForumState['scopes'][string]['authors'] }

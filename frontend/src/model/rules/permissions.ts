@@ -40,10 +40,6 @@ export function canSelectAllFromAuthor(_roles: RoleKind[]): boolean {
   return false
 }
 
-export function canBanById(_roles: RoleKind[]): boolean {
-  return false
-}
-
 export function roleForPostAction(action: PostAction, options: RoleOption[]): RoleOption | null {
   const allowed = POST_ACTION_ROLES[action]
   return options.find(o => allowed.includes(o.kind) && signable(o)) ?? null
@@ -86,6 +82,10 @@ export function canBoardSettings(roles: RoleKind[]): boolean {
 
 export function canBoardCore(roles: RoleKind[]): boolean {
   return hasRole(roles, FORUM_MOD_ROLES)
+}
+
+export function canThreadAdminMgmt(roles: RoleKind[]): boolean {
+  return hasRole(roles, THREAD_ADMIN_MGMT_ROLES)
 }
 
 export function canThreadPin(roles: RoleKind[]): boolean {

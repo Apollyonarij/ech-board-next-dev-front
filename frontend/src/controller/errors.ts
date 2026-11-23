@@ -1,6 +1,10 @@
-import { describeError, type Failure } from '../model/errors'
+import { RequestError, describeError, type Failure } from '../model/errors'
 
 export function failure(error: unknown): Failure {
-  console.error(error)
+  if (error instanceof RequestError) {
+    console.error('RequestError details:', error.detail)
+  } else {
+    console.error(error)
+  }
   return describeError(error)
 }

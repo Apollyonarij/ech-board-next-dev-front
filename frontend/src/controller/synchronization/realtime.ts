@@ -2,12 +2,13 @@ import type { ForumState } from '../../model/state/forum'
 import type { Commit } from '../commit'
 import { failure } from '../errors'
 import type { ForumGateway } from '../forumGateway'
-import { eventChanges } from '../ingestion/events'
+import { banUpdates, eventChanges } from '../ingestion/events'
 import { pageReplacement } from '../ingestion/pages'
 import type { PrepareEntities, Receive } from '../ingestion/receive'
 import { pageSnapshot } from '../ingestion/snapshot'
 import type { RealtimeEvent } from '../io/ech/protocol/events'
 import { RealtimeClient, type Subscription } from '../io/ech/realtime'
+import { relayEndpoint } from '../io/ech/resolve'
 import type { EntityUpdate } from '../state/entities.types'
 
 export function createRealtime(model: ForumState, commit: Commit, gateway: ForumGateway, receive: Receive, prepare: PrepareEntities, isDisposed: () => boolean, restore: () => void) {
@@ -22,7 +23,11 @@ export function createRealtime(model: ForumState, commit: Commit, gateway: Forum
     const next = events.then(async () => {
       if (!current(revision) || model.realtime.phase !== 'live') return
       const changes = await eventChanges(model, gateway, relayUrl, event)
-      if (current(revision) && model.realtime.phase === 'live') receive(changes)
+      if (current(revision) && model.realtime.phase === 'live') {
+        receive(changes)
+        const operations = banUpdates(model, changes.scope.forumId, event)
+        if (operations.length) commit(...operations)
+      }
     })
     events = next.catch((error) => {
       if (current(revision)) {
@@ -65,17 +70,20 @@ export function createRealtime(model: ForumState, commit: Commit, gateway: Forum
     receiveEvent,
     async begin(relayUrl: string, subscription: Subscription) {
       events = Promise.resolve()
+      const endpoint = await relayEndpoint(relayUrl)
       commit({ type: 'realtime.set', value: { phase: 'loading', events: [] } })
-      await client.begin(relayUrl, subscription)
+      await client.begin(endpoint, subscription)
       commit({ type: 'navigation.patch', value: { reconnecting: false } })
       return client.revision
     },
     async finish(revision: number, snapshot: EntityUpdate, page: ForumState['page']) {
       const updates = [snapshot]
+      const bans = []
       let position = 0
       while (current(revision) && model.realtime.phase === 'loading' && position < model.realtime.events.length) {
         const event = JSON.parse(model.realtime.events[position++]) as RealtimeEvent
         updates.push(await eventChanges(model, gateway, snapshot.scope.relayUrl, event, true))
+        bans.push(...banUpdates(model, snapshot.scope.forumId, event))
       }
       if (!current(revision) || model.realtime.phase !== 'loading') return false
       const changes = pageSnapshot(updates, page)
@@ -83,6 +91,7 @@ export function createRealtime(model: ForumState, commit: Commit, gateway: Forum
       commit(
         ...pageReplacement(model, page),
         ...operations,
+        ...bans,
         { type: 'realtime.set', value: { phase: 'live', events: [] } },
         { type: 'navigation.patch', value: { loading: false, refreshing: false, reconnecting: false, error: null } },
       )

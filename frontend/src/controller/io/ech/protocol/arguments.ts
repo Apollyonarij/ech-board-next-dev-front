@@ -10,12 +10,16 @@ export const ArgumentSchemas: Record<string, BcsType<any, any>> = {
   'forum.meta': bcs.struct('Arguments', { forum: Hash }),
   'forum.page': bcs.struct('Arguments', { forum: Hash }),
   'forum.set_title': bcs.struct('Arguments', { forum: Hash, title_hash: Hash }),
+  'forum.set_pow_bits': bcs.struct('Arguments', { forum: Hash, value: bcs.u8() }),
   'board.create': bcs.struct('Arguments', { forum: Hash, slug: bcs.string(), description_hash: optionalHash }),
   'board.meta': bcs.struct('Arguments', { board: Hash }),
   'board.page': bcs.struct('Arguments', { board: Hash, cursor: bcs.option(BoardCursorSchema) }),
   'board.set_readonly': bcs.struct('Arguments', { board: Hash, value: bcs.bool() }),
   'board.set_bump_limit': bcs.struct('Arguments', { board: Hash, value: bcs.u32() }),
   'board.set_max_media': bcs.struct('Arguments', { board: Hash, value: bcs.u8() }),
+  'board.set_post_rate_limit': bcs.struct('Arguments', { board: Hash, value: bcs.u32() }),
+  'board.set_reaction_rate_limit': bcs.struct('Arguments', { board: Hash, value: bcs.u32() }),
+  'board.set_pow_bits': bcs.struct('Arguments', { board: Hash, value: bcs.u8() }),
   'board.set_description': bcs.struct('Arguments', { board: Hash, value: optionalHash }),
   'board.set_ignore_forum_bans': bcs.struct('Arguments', { board: Hash, value: bcs.bool() }),
   'board.set_reactions': bcs.struct('Arguments', { board: Hash, values: hashes }),
@@ -53,8 +57,8 @@ export const ArgumentSchemas: Record<string, BcsType<any, any>> = {
   'post.react': bcs.struct('Arguments', { post: Hash, old: optionalHash, reaction: Hash }),
   'post.ban_media': bcs.struct('Arguments', { post: Hash, hashes }),
   'post.unban_media': bcs.struct('Arguments', { post: Hash, hashes }),
-  'post.set_banned': bcs.struct('Arguments', { post: Hash, banned: bcs.option(EsidSchema) }),
   'post.set_mod_note': bcs.struct('Arguments', { post: Hash, value: optionalHash }),
+  'user.get': bcs.struct('Arguments', {}),
   'debug.entity': bcs.struct('Arguments', { namespace: bcs.string(), id: Hash }),
   'debug.history': bcs.struct('Arguments', { namespace: bcs.string(), id: Hash, before: bcs.option(bcs.u64()), limit: bcs.u32() }),
   'debug.forum': bcs.struct('Arguments', {}),
@@ -64,7 +68,7 @@ for (const scope of ['forum', 'board', 'thread']) {
   const entity = { [scope]: Hash }
   ArgumentSchemas[`${scope}.add_moderator`] = bcs.struct('Arguments', { ...entity, member: EsidSchema })
   ArgumentSchemas[`${scope}.remove_moderator`] = bcs.struct('Arguments', { ...entity, member: EsidSchema })
-  ArgumentSchemas[`${scope}.ban`] = bcs.struct('Arguments', { ...entity, target: EsidSchema, reason_hash: optionalHash, expires: bcs.u64() })
-  ArgumentSchemas[`${scope}.unban`] = bcs.struct('Arguments', { ...entity, target: EsidSchema })
-  ArgumentSchemas[`${scope}.ban_list`] = bcs.struct('Arguments', { ...entity, after: bcs.option(EsidSchema), limit: bcs.u32() })
+  ArgumentSchemas[`${scope}.ban`] = bcs.struct('Arguments', { ...entity, target: Hash, reason_hash: optionalHash, expires: bcs.option(bcs.u64()) })
+  ArgumentSchemas[`${scope}.unban`] = bcs.struct('Arguments', { ...entity, target: Hash })
+  ArgumentSchemas[`${scope}.ban_list`] = bcs.struct('Arguments', { ...entity, after: bcs.option(Hash), limit: bcs.u32() })
 }

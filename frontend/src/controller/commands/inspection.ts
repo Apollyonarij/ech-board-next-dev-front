@@ -11,6 +11,7 @@ import { formatDebugValue } from '../convert/debug'
 import type { ForumGateway } from '../forumGateway'
 import { fetchBans, fetchEntitySnapshot, fetchHistory } from '../io/ech/admin'
 import { convertHistory } from '../convert/history'
+import { txAuthor } from '../convert/genesis'
 
 export function createInspectionCommands(model: ForumState, commit: Commit, gateway: ForumGateway) {
   const requests = new Map<string, { id: number; page: number }>()
@@ -21,15 +22,31 @@ export function createInspectionCommands(model: ForumState, commit: Commit, gate
   const finish = (key: string, id: number) => { if (requests.get(key)?.id === id) requests.delete(key) }
 
   return {
+    async transaction(relayUrl: string, txid: string) {
+      const api = await gateway.connect(relayUrl)
+      const transactions = await api.transactions([txid])
+      return transactions.get(`0x${txid.replace(/^0x/, '')}`) ?? null
+    },
     async loadBans(relayUrl: string, kind: EntityKind, id: string) {
       if (kind === 'post') return
       const key = resourceKey(relayUrl, kind, id)
       const request = begin(`bans:${key}`)
       commit({ type: 'bans.set', value: { key, value: { items: [], loading: true, error: null } } })
       try {
-        const entries = await fetchBans(await gateway.connect(relayUrl), kind, id)
+        const api = await gateway.connect(relayUrl)
+        const { view: bans, contents } = await fetchBans(api, kind, id)
+        const transactions = await api.transactions(bans.map((ban) => toHex(ban.target)))
         if (!current(`bans:${key}`, request)) return
-        const items = entries.map(([author, value]) => ({ author: identityKey(author), reason: value.reason_hash ? toHex(value.reason_hash) : null, expires: Number(value.expires) }))
+        const items = bans.map((ban) => {
+          const target = toHex(ban.target)
+          const tx = transactions.get(target)
+          const author = tx ? txAuthor(tx) : null
+          if (author === null) throw new Error(`Missing transaction ${target}`)
+          const hash = ban.reason_hash ? toHex(ban.reason_hash) : null
+          const bytes = hash ? contents.get(hash) : null
+          const reason = hash === null ? null : bytes ? new TextDecoder().decode(bytes) : hash
+          return { target, author: identityKey(author), reason, expires: ban.expires === null ? null : Number(ban.expires) }
+        })
         commit({ type: 'bans.set', value: { key, value: { items, loading: false, error: null } } })
       } catch (error) {
         if (current(`bans:${key}`, request)) commit({ type: 'bans.set', value: { key, value: { items: [], loading: false, error: describeError(error) } } })

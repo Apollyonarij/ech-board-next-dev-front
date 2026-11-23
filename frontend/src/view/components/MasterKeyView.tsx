@@ -6,8 +6,9 @@ import { useI18n } from '../i18n'
 import { Button } from './Button'
 import { Field } from './Field'
 
-const pageVariants = cva('max-w-settings p-6')
-const descVariants = cva('mb-4 text-lg leading-normal text-secondary')
+const titleVariants = cva('mb-1 text-lg font-semibold text-fg leading-tight')
+const descVariants = cva('mb-2 text-sm leading-normal text-secondary')
+const warningVariants = cva('mb-4 text-sm leading-normal text-warn')
 const rowVariants = cva('flex flex-wrap items-center gap-2')
 const statusVariants = cva('mt-2.5 text-sm text-secondary')
 const importColVariants = cva('mt-4 flex flex-col gap-2.5')
@@ -47,8 +48,10 @@ export function MasterKeyView() {
   }
 
   return (
-    <div class={pageVariants()}>
+    <div>
+      <div class={titleVariants()}>{t('settings.masterKeyTitle')}</div>
       <p class={descVariants()}>{t('settings.masterKeyDesc')}</p>
+      <p class={warningVariants()}>{t('settings.masterKeyWarning')}</p>
       <div class={rowVariants()}>
         <Button onClick={() => void copy()}>{t('settings.copy')}</Button>
         <Button onClick={() => setImporting(true)}>{t('settings.import')}</Button>

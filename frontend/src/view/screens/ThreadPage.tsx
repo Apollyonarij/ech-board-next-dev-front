@@ -1,7 +1,7 @@
 import { useLocation } from '@solidjs/router'
 import { cva } from 'class-variance-authority'
 import { createEffect, createMemo, onCleanup, Show } from 'solid-js'
-import { canBanById, canPostAction } from '../../model/rules/permissions'
+import { canPostAction } from '../../model/rules/permissions'
 import { useForumController, useForumQueries, usePage } from '../bindings/forum'
 import { useIsMobile } from '../components/Gallery/useIsMobile'
 import { IncrementalList } from '../components/IncrementalList'
@@ -21,8 +21,8 @@ import { threadModItems } from '../threadModItems'
 const pageVariants = cva('flex min-h-screen min-w-0 flex-col')
 const screenVariants = cva('flex min-h-dvh flex-col')
 const menuTriggerVariants = cva('ml-auto px-1 py-2 hover:bg-hover')
-const listVariants = cva('pl-4 pr-3.5 pb-[4.25rem]')
-const listMobileVariants = cva('pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] pb-[4.25rem] pt-2.5')
+const listVariants = cva('pl-4 pr-3.5')
+const listMobileVariants = cva('pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] pb-0 pt-2.5')
 const markerVariants = cva('my-3 w-full border-t-2 border-dashed border-accent will-change-transform')
 
 export function ThreadPage(props: { forumId: string; slug: string; threadNum: number }) {
@@ -37,7 +37,6 @@ export function ThreadPage(props: { forumId: string; slug: string; threadNum: nu
     const items = threadModItems(t, ea, { threadId: current.id, closed: current.closed, deleted: current.deleted })
     items.push({ label: t('mod.moderators'), onClick: () => ea.openThreadModerators(current.id) })
     items.push({ label: t('mod.bans'), onClick: () => ea.openBans(t('mod.bans'), 'thread', current.id) })
-    if (ea.canBanAny() && canBanById(ea.roleKinds())) items.push({ label: t('mod.banId'), onClick: () => ea.openBanId() })
     return items
   }
   return (

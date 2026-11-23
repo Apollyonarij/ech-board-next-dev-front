@@ -117,7 +117,6 @@
   --global-bar-h: 65px;
   --post-max-w: 1000px;
   --post-bg: var(--color-panel1);
-  --radius-xs: 2px;
   --radius-composer: 30px;
   background: var(--color-bg);
 }
@@ -300,6 +299,8 @@
 }
 }
 
+
+/* Restored custom fixed Composer layout from the user's frontend. */
 .layout-anim {
   transition: left 0.2s ease, right 0.2s ease;
 }
@@ -344,12 +345,8 @@ main.ml-nav-collapsed .composer-fixed {
 }
 
 @keyframes composer-reveal {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .fade-in {
@@ -364,7 +361,6 @@ main.ml-nav-collapsed .composer-fixed {
 }
 
 @media (max-width: 899px) {
-
   .composer-fixed,
   main.ml-nav-collapsed .composer-fixed {
     left: 0;

@@ -5,11 +5,23 @@ import type { ForumState } from '../../model/state/forum'
 import { requiredResources } from '../convert/resources'
 import { postValue } from '../convert/versions'
 import type { ForumGateway } from '../forumGateway'
+import { ArgumentSchemas } from '../io/ech/protocol/arguments'
 import { parseEntity, type BoardEntity, type ForumEntity, type PostEntity, type ThreadEntity } from '../io/ech/protocol/entities'
 import { EntityId } from '../io/ech/protocol/entityId'
 import type { RealtimeEvent } from '../io/ech/protocol/events'
 import { EsidSchema, MediaMetaSchema, TxSchema } from '../io/ech/protocol/transactions'
 import type { EntityUpdate } from '../state/entities.types'
+import type { Operation } from '../state/operations'
+import type { BanScope } from '../../model/rules/permissions'
+
+const BAN_EVENTS: Record<string, { scope: BanScope; banned: boolean }> = {
+  'forum.ban': { scope: 'forum', banned: true },
+  'board.ban': { scope: 'board', banned: true },
+  'thread.ban': { scope: 'thread', banned: true },
+  'forum.unban': { scope: 'forum', banned: false },
+  'board.unban': { scope: 'board', banned: false },
+  'thread.unban': { scope: 'thread', banned: false },
+}
 
 
 export async function eventChanges(model: ForumState, gateway: ForumGateway, relayUrl: string, event: RealtimeEvent, fresh = false): Promise<EntityUpdate> {
@@ -17,17 +29,17 @@ export async function eventChanges(model: ForumState, gateway: ForumGateway, rel
   const root = toHex(api.root)
   const scope = fresh ? undefined : model.scopes[forumKey(root)]
   const contents = new Map<string, Uint8Array>()
-  for (const item of event.contents) {
+  for (const item of event.payload.contents) {
     const hash = toHex(fromHex(item.hash))
     if (!scope?.contents[hash]) contents.set(hash, fromHex(item.value))
   }
-  const attachments = new Map<string, Media>(event.attachments.map((item) => [toHex(fromHex(item.hash)), MediaMetaSchema.parse(fromHex(item.value))]))
+  const attachments = new Map<string, Media>(event.payload.attachments.map((item) => [toHex(fromHex(item.hash)), MediaMetaSchema.parse(fromHex(item.value))]))
   const posts: PostEntity[] = []
   const threads: ThreadEntity[] = []
   const boards: BoardEntity[] = []
   const forums: ForumEntity[] = []
   const changes: EntityUpdate = { txid: event.txid, scope: { forumId: root, relayUrl }, posts, threads, boards, forums }
-  for (const entity of event.entities) {
+  for (const entity of event.payload.entities) {
     const bytes = fromHex(entity.value)
     if (entity.kind === 'post') posts.push(parseEntity('post', bytes))
     if (entity.kind === 'thread') threads.push(parseEntity('thread', bytes))
@@ -35,7 +47,7 @@ export async function eventChanges(model: ForumState, gateway: ForumGateway, rel
     if (entity.kind === 'forum') forums.push(parseEntity('forum', bytes))
   }
   changes.transactions = new Map(
-    event.transactions.map((item) => [toHex(fromHex(item.hash)), TxSchema.parse(fromHex(item.value))]),
+    event.payload.transactions.map((item) => [toHex(fromHex(item.hash)), TxSchema.parse(fromHex(item.value))]),
   )
   if (!fresh) {
     changes.threads = threads.filter((entity) => model.page.mode === 'thread'
@@ -70,4 +82,26 @@ export async function eventChanges(model: ForumState, gateway: ForumGateway, rel
   changes.attachments = attachments
   changes.retention = 'realtime'
   return changes
+}
+
+export function banUpdates(model: ForumState, root: string, event: RealtimeEvent): Operation[] {
+  const update = BAN_EVENTS[event.function]
+  if (!update) return []
+  const key = forumKey(root)
+  const scope = model.scopes[key]
+  if (!scope) return []
+  const tx = event.payload.transactions
+    .map((item) => TxSchema.parse(fromHex(item.value)))
+    .find((tx) => tx.user.call.function === event.function)
+  if (!tx) return []
+  const args = ArgumentSchemas[event.function].parse(tx.user.call.args) as { target: Uint8Array }
+  const target = toHex(args.target)
+  const post = Object.values(scope.entities.posts).find((value) => toHex(value.txid) === target)
+  if (!post) return []
+  const previous = scope.postBans[post.id] ?? []
+  const scopes = update.banned
+    ? previous.includes(update.scope) ? previous : [...previous, update.scope]
+    : previous.filter((value) => value !== update.scope)
+  if (scopes === previous) return []
+  return [{ type: 'postBans.set', value: { root: key, id: post.id, scopes } }]
 }

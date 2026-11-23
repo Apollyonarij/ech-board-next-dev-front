@@ -17,23 +17,27 @@ import {
   PostPageSchema,
   ThreadMetaSchema,
   ThreadPageSchema,
+  UserEntitySchema,
   UserRequestsSchema,
   type BoardPageEntity,
   type ForumPageEntity,
   type PostPageEntity,
   type ThreadPageEntity,
+  type UserEntity,
   type UserRequests,
 } from './protocol/entities'
 import { EntityId } from './protocol/entityId'
 import {
   ResourcesSchema,
   MediaMetaSchema,
+  TxSchema,
   type Media,
   SignedSchema,
   UserPartSchema,
   type Call,
   type Esid,
   type Resources,
+  type Tx,
 } from './protocol/transactions'
 
 const CONTENT_TYPE = 'application/octet-stream'
@@ -82,6 +86,7 @@ export type Submission = {
   access: Access
   requests: UserRequests
   trip: string | null
+  powBits?: number
   blobs?: Uint8Array[]
 }
 
@@ -94,12 +99,10 @@ export async function submit(
   const form = new FormData()
   const txids: string[] = []
   for (const entry of entries) {
-    const user = identity.sign(
-      relay.root,
-      UserRequestsSchema.serialize(entry.requests).toBytes(),
-      entry.request,
-      entry.access.tweak,
-    )
+    const ctx = UserRequestsSchema.serialize(entry.requests).toBytes()
+    const user = entry.powBits
+      ? await identity.grind(relay.root, ctx, entry.request, entry.powBits, entry.access.tweak)
+      : identity.sign(relay.root, ctx, entry.request, entry.access.tweak)
     txids.push(
       hex(
         blake2b(
@@ -148,15 +151,26 @@ async function read<T>(
   return parseResources<T>(bytes, schema)
 }
 
-function parseResources<T>(bytes: Uint8Array, schema: BcsType<any, any, any>): Resources<T> {
+async function readRaw<T>(
+  relay: Relay,
+  identity: Identity,
+  request: Call,
+  access: Access,
+  schema: BcsType<any, any, any>,
+): Promise<T> {
+  const [bytes] = await query(relay, identity, [{ request, access }])
+  return schema.parse(bytes)
+}
+
+export function parseResources<T>(bytes: Uint8Array, schema: BcsType<any, any, any>): Resources<T> {
   const parsed = ResourcesSchema(schema).parse(bytes)
   return {
     view: parsed.view as T,
     contents: new Map(
-      Array.from(parsed.contents, ([hash, bytes]) => [hex(hash), bytes]),
+      Array.from(parsed.contents, ([hash, bytes]) => [`0x${hex(hash)}`, bytes]),
     ),
     attachments: new Map(
-      Array.from(parsed.attachments, ([hash, media]) => [hex(hash), media]),
+      Array.from(parsed.attachments, ([hash, media]) => [`0x${hex(hash)}`, media]),
     ),
     transactions: new Map(
       Array.from(parsed.transactions, ([hash, tx]) => [`0x${hex(hash)}`, tx]),
@@ -173,14 +187,20 @@ export async function query(
   relay: Relay,
   identity: Identity,
   queries: Query[],
-): Promise<Uint8Array[]> {
-  const body = queries.map(({ request, access }) => ({
+): Promise<Uint8Array[]> {  const body = queries.map(({ request, access }) => ({
     user: identity.sign(relay.root, UserRequestsSchema.serialize(NO_REQUESTS).toBytes(), request, access.tweak),
     decryptions: access.decrypt ?? [],
   }))
   const payload = bcs.vector(SignedSchema).serialize(body).toBytes()
   const bytes = await post(relay, 'query', payload)
   return bcs.vector(bcs.byteVector()).parse(bytes)
+}
+
+export async function readTransactions(relay: Relay, txids: Uint8Array[]): Promise<Map<string, Tx>> {
+  const payload = bcs.vector(bcs.bytes(32)).serialize(txids).toBytes()
+  const bytes = await post(relay, 'transactions', payload)
+  const parsed = bcs.map(bcs.bytes(32), TxSchema).parse(bytes)
+  return new Map(Array.from(parsed, ([hash, tx]) => [`0x${hex(hash)}`, tx]))
 }
 
 export async function readMetadata(
@@ -255,6 +275,20 @@ export function readPost(
     call(relay, 'post.get', id),
     access,
     PostPageSchema,
+  )
+}
+
+export function readUser(
+  relay: Relay,
+  identity: Identity,
+  access: Access,
+): Promise<UserEntity | null> {
+  return readRaw<UserEntity | null>(
+    relay,
+    identity,
+    call(relay, 'user.get', new Uint8Array()),
+    access,
+    bcs.option(UserEntitySchema),
   )
 }
 

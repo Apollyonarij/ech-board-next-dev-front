@@ -61,7 +61,7 @@ const postTextVariants = cva('post-text whitespace-pre-wrap break-words', {
   defaultVariants: { state: 'expanded' },
 })
 
-const reactionVariants = cva('inline-flex cursor-pointer items-center justify-center rounded-full border-0 px-2 py-1 gap-1 text-sm text-fg text-bold leading-none hover:bg-hover', {
+const reactionVariants = cva('inline-flex cursor-pointer items-center justify-center rounded-full border-0 px-2 py-0.5 gap-1 text-sm text-fg text-bold leading-none hover:bg-hover', {
   variants: {
     active: {
       true: 'bg-reaction',
@@ -125,6 +125,7 @@ export function PostBody(props: {
   }
   const lineCount = createMemo(() => postLineCount(props.post.parts ?? [], expandFolds()))
   const long = () => lineCount() > 15
+  const hasBody = () => props.post.media.length > 0 || (props.post.parts !== null ? props.post.parts.length > 0 : props.post.plain.length > 0)
   const fullTime = () => {
     if (!props.post.createdAt) return ''
     const d = new Date(props.post.createdAt)
@@ -155,8 +156,9 @@ export function PostBody(props: {
         selected: selected(),
         tooltip: !!props.tooltip,
       })}
+      style={{ 'border-width': 'var(--post-border-width, 0px)', 'border-color': 'var(--post-border, transparent)' }}
     >
-      <div class={'mb-1.5 flex items-center gap-1.5 text-sm text-secondary'}>
+      <div class={'flex items-center gap-1.5 text-sm text-secondary'} classList={{ 'mb-1.5': hasBody() }}>
         <Show when={selectable()}>
           <span
             role="checkbox"
@@ -268,7 +270,7 @@ export function PostBody(props: {
           threads: props.post.threadcount?.toString() ?? '',
         })}</div>
       </Show>
-      <Show when={props.post.banned}>
+      <Show when={props.post.bannedScopes.length > 0}>
         <div class={'mt-5 text-warn italic'}>{t('post.authorBanned')}</div>
       </Show>
       <Show when={props.post.reactions.length > 0}>
@@ -281,7 +283,7 @@ export function PostBody(props: {
                 onClick={() => void react(item.hex)}
                 class={reactionVariants({ active: item.hex === props.post.myReaction })}
               >
-                <img src={item.url} alt="" class={'size-4'} />
+                <img src={item.url} alt="" class={'size-5'} />
                 {item.count}
               </button>
             )}

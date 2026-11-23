@@ -1,39 +1,43 @@
 import { cva } from 'class-variance-authority'
-import { For, type JSX } from 'solid-js'
+import { For } from 'solid-js'
 import { IconButton } from '../IconButton'
 import { useI18n } from '../../i18n'
 import type { MessageKey } from '../../i18n/ru'
-import { BoldIcon } from '../../icons/BoldIcon'
-import { ItalicIcon } from '../../icons/ItalicIcon'
-import { StrikethroughIcon } from '../../icons/StrikethroughIcon'
-import { EyeOffIcon } from '../../icons/EyeOffIcon'
-import { CodeIcon } from '../../icons/CodeIcon'
-import { UnderlineIcon } from '../../icons/UnderlineIcon'
-import { OverlineIcon } from '../../icons/OverlineIcon'
-import { SuperscriptIcon } from '../../icons/SuperscriptIcon'
-import { SubscriptIcon } from '../../icons/SubscriptIcon'
-import { FoldIcon } from '../../icons/FoldIcon'
-import { SecretIcon } from '../../icons/SecretIcon'
 
 const rowVariants = cva(
   'flex w-full flex-wrap items-center gap-1.5 min-[900px]:w-auto min-[900px]:gap-2.5',
 )
-const ICONS: Record<string, () => JSX.Element> = {
-  b: () => <BoldIcon width={24} height={24} />,
-  i: () => <ItalicIcon width={24} height={24} />,
-  u: () => <UnderlineIcon width={24} height={24} />,
-  o: () => <OverlineIcon width={24} height={24} />,
-  s: () => <StrikethroughIcon width={24} height={24} />,
-  sup: () => <SuperscriptIcon width={24} height={24} />,
-  sub: () => <SubscriptIcon width={24} height={24} />,
-  spoiler: () => <EyeOffIcon width={24} height={24} />,
-  fold: () => <FoldIcon width={24} height={24} />,
-  code: () => <CodeIcon width={24} height={24} />,
-  secret: () => <SecretIcon width={24} height={24} />,
+
+// Text samples are intentionally styled to preview the formatting they insert.
+// Special BB tags use the compact visual labels requested for the toolbar.
+const TEXT_LABEL: Record<string, string> = {
+  b: 'B',
+  i: 'I',
+  u: 'U',
+  o: 'O',
+  s: 'S',
+  sup: 'x²',
+  sub: 'x₂',
+  spoiler: '[---]',
+  fold: '=v',
+  url: '[123]',
+  code: '<>',
+  secret: '???',
 }
 
-const TEXT_LABEL: Record<string, string> = {
-  url: 'url',
+const TEXT_STYLE: Record<string, string> = {
+  b: 'font-sans text-[16px] font-black',
+  i: 'font-serif text-[16px] font-semibold italic',
+  u: 'text-[15px] font-semibold underline underline-offset-2',
+  o: 'text-[15px] font-semibold overline',
+  s: 'text-[15px] font-semibold line-through',
+  sup: 'font-serif text-[15px] font-semibold',
+  sub: 'font-serif text-[15px] font-semibold',
+  spoiler: 'font-mono text-[10px] font-bold tracking-[-0.08em]',
+  fold: 'font-mono text-[15px] font-bold',
+  url: 'text-[11px] font-semibold',
+  code: 'font-mono text-[18px] font-bold',
+  secret: 'font-mono text-[12px] font-bold tracking-tight',
 }
 
 interface BbTag {
@@ -68,11 +72,20 @@ export function BbToolbar(props: { onInsertTag: (tag: string) => void }) {
             aria-label={t(btn.titleKey)}
             onClick={() => props.onInsertTag(btn.tag)}
           >
-            {btn.tag in ICONS ? (
-              ICONS[btn.tag]()
-            ) : (
-              <span class="grid size-6 place-items-center font-mono text-[15px] font-bold leading-none">{TEXT_LABEL[btn.tag] ?? btn.tag}</span>
-            )}
+            <span
+              aria-hidden="true"
+              class={`grid size-6 place-items-center leading-none ${TEXT_STYLE[btn.tag] ?? 'font-mono text-sm font-bold'}`}
+            >
+              {btn.tag === 'sup' ? (
+                <sup>sup</sup>
+              ) : btn.tag === 'sub' ? (
+                <sub>sub</sub>
+              ) : btn.tag === 'spoiler' ? (
+                '[---]'
+              ) : (
+                TEXT_LABEL[btn.tag] ?? btn.tag
+              )}
+            </span>
           </IconButton>
         )}
       </For>

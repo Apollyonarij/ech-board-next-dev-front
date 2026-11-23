@@ -8,6 +8,7 @@ import { useI18n } from '../i18n'
 
 import { fromHex, toHex } from '../../model/content/hex'
 import type { Board } from '../../model/entities/board'
+import { parseEsid } from '../../model/rules/identity'
 
 import { Button } from './Button'
 import { Field } from './Field'
@@ -28,16 +29,14 @@ const listRemoveVariants = cva('cursor-pointer border-0 bg-transparent text-fg')
 const toggleLabelVariants = cva('flex items-center gap-2 text-lg')
 const hiddenInputVariants = cva('hidden')
 
-function parseEsid(s: string): string | null {
-  const clean = s.replace(/^0x/, '')
-  return clean.length === 192 && /^[0-9a-fA-F]+$/.test(clean) ? clean.toLowerCase() : null
-}
-
 export interface BoardModActions {
   busy: boolean
   runBoardSetDescription: (text: string) => Promise<void>
   runBoardSetMaxMedia: (v: number) => Promise<void>
   runBoardSetBumpLimit: (v: number) => Promise<void>
+  runBoardSetPostRateLimit: (v: number) => Promise<void>
+  runBoardSetReactionRateLimit: (v: number) => Promise<void>
+  runBoardSetPowBits: (v: number) => Promise<void>
   runBoardSetIgnoreForumBans: (v: boolean) => Promise<void>
   runBoardSetReactions: (vals: Uint8Array[]) => Promise<void>
   runBoardSetPinned: (pinned: number[]) => Promise<void>
@@ -63,6 +62,9 @@ export function BoardSettingsModal(props: {
   const [desc, setDesc] = createSignal('')
   const [maxMedia, setMaxMedia] = createSignal('')
   const [bumpLimit, setBumpLimit] = createSignal('')
+  const [postRateLimit, setPostRateLimit] = createSignal('')
+  const [reactionRateLimit, setReactionRateLimit] = createSignal('')
+  const [powBits, setPowBits] = createSignal('')
   const [ignoreBans, setIgnoreBans] = createSignal(false)
   const [reactions, setReactions] = createSignal<Uint8Array[]>([])
   const [pinned, setPinned] = createSignal<number[]>([])
@@ -74,6 +76,9 @@ export function BoardSettingsModal(props: {
     const bp = props.board
     setMaxMedia(String(bp.maxMedia))
     setBumpLimit(String(bp.bumpLimit))
+    setPostRateLimit(String(bp.postRateLimit))
+    setReactionRateLimit(String(bp.reactionRateLimit))
+    setPowBits(String(bp.powBits))
     setIgnoreBans(!!bp.ignoreForumBans)
     setReactions(((bp.reactions as Uint8Array[] | undefined) ?? []).map((entry) => new Uint8Array(entry)))
     setPinned(bp.pinned)
@@ -167,6 +172,42 @@ export function BoardSettingsModal(props: {
           <div class={rowVariants()}>
             <Field as="input" type="number" grow="min-w-input" value={bumpLimit()} onInput={(e) => setBumpLimit(e.currentTarget.value)} />
             <Button disabled={props.mod.busy} onClick={() => saveNumber(props.mod.runBoardSetBumpLimit)(bumpLimit())}>
+              {t('mod.save')}
+            </Button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.canCore}>
+        <div class={sectionVariants()}>
+          <div class={labelVariants()}>{t('settings.board.postRateLimit')}</div>
+          <div class={rowVariants()}>
+            <Field as="input" type="number" grow="min-w-input" value={postRateLimit()} onInput={(e) => setPostRateLimit(e.currentTarget.value)} />
+            <Button disabled={props.mod.busy} onClick={() => saveNumber(props.mod.runBoardSetPostRateLimit)(postRateLimit())}>
+              {t('mod.save')}
+            </Button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.canCore}>
+        <div class={sectionVariants()}>
+          <div class={labelVariants()}>{t('settings.board.reactionRateLimit')}</div>
+          <div class={rowVariants()}>
+            <Field as="input" type="number" grow="min-w-input" value={reactionRateLimit()} onInput={(e) => setReactionRateLimit(e.currentTarget.value)} />
+            <Button disabled={props.mod.busy} onClick={() => saveNumber(props.mod.runBoardSetReactionRateLimit)(reactionRateLimit())}>
+              {t('mod.save')}
+            </Button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.canCore}>
+        <div class={sectionVariants()}>
+          <div class={labelVariants()}>{t('settings.board.powBits')}</div>
+          <div class={rowVariants()}>
+            <Field as="input" type="number" grow="min-w-input" value={powBits()} onInput={(e) => setPowBits(e.currentTarget.value)} />
+            <Button disabled={props.mod.busy} onClick={() => saveNumber(props.mod.runBoardSetPowBits)(powBits())}>
               {t('mod.save')}
             </Button>
           </div>

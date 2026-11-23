@@ -74,9 +74,19 @@ export function PostTooltipProvider(props: {
     })
   })
 
+  const prune = () => {
+    const dead = current.filter((entry) => !entry.anchor().isConnected)
+    if (dead.length === 0) return
+    controller.closePreviews(dead.map((entry) => entry.id))
+    controller.releasePreviews(dead.map((entry) => entry.id))
+    for (const entry of dead) elements.delete(entry.id)
+    update(current.filter((entry) => entry.anchor().isConnected))
+  }
+
   const open = (anchor: HTMLElement, target: PostTooltipTarget) => {
-    if (current.some((entry) => entry.anchor === anchor)) return
     clearClose()
+    prune()
+    if (current.some((entry) => entry.anchor() === anchor)) return
     let nested = false
     for (let i = current.length - 1; i >= 0; i--) {
       const el = elements.get(current[i].id)
@@ -86,9 +96,11 @@ export function PostTooltipProvider(props: {
       }
     }
     const id = controller.openPreview(target)
+    const [anchorSignal, setAnchorSignal] = createSignal(anchor)
     const entry: Entry = {
       id,
-      anchor,
+      anchor: anchorSignal,
+      setAnchor: setAnchorSignal,
       target,
     }
     if (nested) {
@@ -99,7 +111,7 @@ export function PostTooltipProvider(props: {
     }
   }
 
-  const isOpen = (anchor: HTMLElement) => current.some((entry) => entry.anchor === anchor)
+  const isOpen = (anchor: HTMLElement) => current.some((entry) => entry.anchor() === anchor)
   const api: Api = { open, isOpen }
 
   const isOver = (el: HTMLElement | null | undefined, e: PointerEvent): boolean => {
@@ -114,7 +126,7 @@ export function PostTooltipProvider(props: {
     let deeperKept = false
     let deepestKept = -1
     for (let i = current.length - 1; i >= 0; i--) {
-      const inOwn = isOver(elements.get(current[i].id), e) || isOver(current[i].anchor, e)
+      const inOwn = isOver(elements.get(current[i].id), e) || isOver(current[i].anchor(), e)
       const stay: boolean = inOwn || deeperKept
       if (stay && deepestKept === -1) deepestKept = i
       deeperKept = stay

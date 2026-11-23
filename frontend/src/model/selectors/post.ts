@@ -8,8 +8,10 @@ import type { Post } from '../entities/post'
 import { optionalIdentityKey } from '../rules/identity'
 import { canPostAction, canUnbanMedia, type PostAction } from '../rules/permissions'
 import { postRole } from '../rules/roles'
-import { numberKey, referenceKey, scopeModerators } from '../selectors/forum'
+import { forumKey, numberKey, referenceKey, scopeModerators } from '../selectors/forum'
 import type { ForumState } from '../state/forum'
+
+const EMPTY_PARTS: Post['parts'] = []
 
 export function postFields(model: ForumState, root: string, id: string) {
   const localScope = model.scopes[root]
@@ -20,6 +22,10 @@ export function postFields(model: ForumState, root: string, id: string) {
   const board = () => scope().entities.boards[boardId()]
   const roles = () => thread()?.roles ?? board()?.roles ?? []
   const allowed = (action: PostAction) => canPostAction(action, roles().map((role) => role.kind), scope().permissionDeadlines[id] !== undefined)
+  const forumHost = (forum: string) => {
+    const entry = model.navigation.forums.find((value) => forumKey(value.forumId) === forum)
+    return entry ? new URL(entry.relayUrl).host : null
+  }
 
   return {
     threadId: () => scope().threadIds[numberKey(post().board, post().threadNumber)] ?? '',
@@ -37,15 +43,19 @@ export function postFields(model: ForumState, root: string, id: string) {
     hasText: () => post().parts.length > 0,
     parts: () => {
       const hash = post().textHash
-      if (!hash) return []
+      if (!hash) return EMPTY_PARTS
       const key = toHex(hash)
-      return scope().parts[key] ?? []
+      return scope().parts[key] ?? EMPTY_PARTS
     },
     plain: () => {
       const parts = post().parts
-      return partsToPlainText(parts, true, { forumId: root, board: post().board })
+      return partsToPlainText(parts, true, { forumId: root, board: post().board, forumHost })
     },
-    refs: () => model.references[referenceKey(root, numberKey(post().board, post().number))]?.items ?? [],
+    refs: () => {
+      const items = model.references[referenceKey(root, numberKey(post().board, post().number))]?.items ?? []
+      if (model.preferences.showDeleted) return items
+      return items.filter((ref) => !scope().entities.posts[ref.postId]?.deleted)
+    },
     refsRevision: () => model.references[referenceKey(root, numberKey(post().board, post().number))]?.revision ?? 0,
     media: () => postMedia(post(), scope()),
     reactions: () => {
@@ -75,11 +85,24 @@ export function postFields(model: ForumState, root: string, id: string) {
       return pending && pending.base === base ? pending.local : base
     },
     myReactionBase: () => scope().myReactions[id]?.value ?? null,
+    bannedScopes: () => scope().postBans[id] ?? [],
     reactionPending: () => scope().pendingReactions[id] !== undefined,
-    repliedMine: () => false,
+    repliedMine: () => {
+      const targets = model.outgoing[referenceKey(root, id)]
+      if (!targets) return false
+      const prefix = `${forumKey(root)}:`
+      for (const target of targets) {
+        if (!target.startsWith(prefix)) continue
+        const rest = target.slice(prefix.length)
+        const slash = rest.lastIndexOf('/')
+        if (slash < 0) continue
+        const targetId = scope().postIds[numberKey(rest.slice(0, slash), Number(rest.slice(slash + 1)))]
+        const author = targetId ? scope().entities.posts[targetId]?.author : null
+        if (author && scope().authors[author]?.mine) return true
+      }
+      return false
+    },
     hidden: () => post().deleted || post().op && (thread()?.deleted ?? false),
-    banned: () => post().bannedBy !== null,
-    bannedLevel: () => optionalIdentityKey(post().bannedBy),
     mine: () => {
       const author = post().author
       return author !== null && (scope().authors[author]?.mine ?? false)

@@ -18,17 +18,19 @@ const bigMap = (name: string) => struct(name, {})
 export { TxSchema }
 export type { Tx }
 
-const BanValueSchema = struct('BanValue', {
+const BanSchema = struct('Ban', {
+  target: Hash,
   reason_hash: bcs.option(Hash),
-  expires: bcs.u64(),
+  expires: bcs.option(bcs.u64()),
 })
 
-export const BanEntriesSchema = bcs.vector(bcs.tuple([EsidSchema, BanValueSchema]))
-export type BanEntry = typeof BanEntriesSchema.$inferType[number]
+export type BanValue = typeof BanSchema.$inferType
+
+export const BanEntriesSchema = bcs.vector(BanSchema)
 
 const BansSchema = struct('Bans', {
-  public: bigMap('BigMap<Esid, BanValue>'),
-  private: bigMap('BigMap<Sid, Esid>'),
+  records: bigMap('BigMap<Sid, Vec<Ban>>'),
+  targets: bigMap('BigMap<[u8; 32], Sid>'),
 })
 
 export const PostKeySchema = struct('PostKey', {
@@ -50,7 +52,6 @@ const PostV1Schema = struct('PostV1', {
   voted: bigMap('BigMap<Sid, Vec<Hash>>'),
   reacted: bigMap('BigMap<Sid, Hash>'),
   mod_note_hash: bcs.option(Hash),
-  banned: bcs.option(EsidSchema),
   postcount: bcs.option(bcs.u64()),
   threadcount: bcs.option(bcs.u64()),
 })
@@ -84,6 +85,9 @@ const BoardV1Schema = struct('BoardV1', {
   readonly: bcs.bool(),
   bump_limit: bcs.u32(),
   max_media: bcs.u8(),
+  post_rate_limit_ms: bcs.u32(),
+  reaction_rate_limit_ms: bcs.u32(),
+  pow_bits: bcs.u8(),
   thread_count: bcs.u64(),
   post_count: bcs.u64(),
   pinned: bcs.vector(bcs.u64()),
@@ -98,6 +102,7 @@ const ForumKeySchema = struct('ForumKey', {})
 
 const ForumV1Schema = struct('ForumV1', {
   title_hash: bcs.option(Hash),
+  pow_bits: bcs.u8(),
   moderators: bcs.vector(EsidSchema),
   bans: BansSchema,
   boards: struct('BigLog<BoardKey>', { entries: bigMap('BigMap<u64, BoardKey>'), length: bcs.u64() }),
@@ -115,6 +120,16 @@ export const PostEntitySchema = entity(PostKeySchema, enumeration('Post', { V1: 
 export const ThreadEntitySchema = entity(ThreadKeySchema, enumeration('Thread', { V1: ThreadV1Schema }))
 export const BoardEntitySchema = entity(BoardKeySchema, enumeration('Board', { V1: BoardV1Schema }))
 export const ForumEntitySchema = entity(ForumKeySchema, enumeration('Forum', { V1: ForumV1Schema }))
+
+const UserV1Schema = struct('UserV1', {
+  post_count: bcs.u64(),
+  thread_count: bcs.u64(),
+  last_post: bcs.u64(),
+  last_reaction: bcs.u64(),
+})
+
+export const UserEntitySchema = entity(bcs.bytes(32), enumeration('User', { V1: UserV1Schema }))
+export type UserEntity = typeof UserEntitySchema.$inferType
 
 export const HistoryPageSchema = struct('HistoryPage', {
   entries: bcs.vector(TxSchema),
@@ -203,13 +218,27 @@ export const ThreadMetaSchema = struct('ThreadMeta', {
   page_size: bcs.u64(),
 })
 
+export const BanScopeSchema = bcs.enum('BanScope', {
+  Thread: null,
+  Board: null,
+  Forum: null,
+})
+
+export type BanScopeValue = typeof BanScopeSchema.$inferType
+
+export const BanMapSchema = bcs.map(BanScopeSchema, bcs.vector(Hash))
+
+export type BanMapValue = typeof BanMapSchema.$inferType
+
 export const PostPageSchema = struct('PostPage', {
   post: PostEntitySchema,
   my_reactions: bcs.map(Hash, Hash),
+  bans: BanMapSchema,
 })
 
 export const ThreadPageSchema = struct('ThreadPage', {
   my_reactions: bcs.map(Hash, Hash),
+  bans: BanMapSchema,
   posts: bcs.map(bcs.u64(), PostEntitySchema),
   next: bcs.option(bcs.u64()),
 })
@@ -230,6 +259,7 @@ export const BoardCursorSchema = struct('BoardCursor', {
 
 export const BoardPageSchema = struct('BoardPage', {
   my_reactions: bcs.map(Hash, Hash),
+  bans: BanMapSchema,
   threads: bcs.vector(ThreadPreviewSchema),
   next: bcs.option(BoardCursorSchema),
 })

@@ -1,10 +1,10 @@
 import type { Failure } from '../errors'
-export type SettingSlug = 'key' | 'appearance'
-export type SettingKey = 'Master Key' | 'Appearance'
+export type SettingSlug = 'account' | 'appearance' | 'about'
+export type SettingKey = 'Account' | 'Appearance' | 'About'
 
 
 export type Route =
-  | { page: 'boards'; forumId?: string }
+  | { page: 'boards' }
   | { page: 'board'; forumId: string; slug: string }
   | { page: 'thread'; forumId: string; slug: string; threadNum: number; replyTo?: number; scrollTo?: 'top' | 'bottom'; postNum?: number }
   | { page: 'compose'; forumId: string; slug: string }
@@ -14,7 +14,6 @@ export type Route =
 export interface ForumInfo {
   forumId: string
   relayUrl: string
-  host: string
 }
 
 export interface BoardInfo {
@@ -30,6 +29,8 @@ export interface NavigationState {
   lastContentRoute: Route | null
   context: { forumId: string; relayUrl: string } | null
   forums: ForumInfo[]
+  forumErrors: Record<string, Failure | null>
+  collapsedForums: string[]
   loading: boolean
   refreshing: boolean
   reconnecting: boolean
